@@ -1,0 +1,16 @@
+read_verilog -sv src/verilog/tpu_pkg.sv src/verilog/mac_cell.sv src/verilog/systolic_data_setup.sv src/verilog/unified_buffer.sv src/verilog/tpu_fsm.sv src/verilog/tpu.sv
+hierarchy -check -top tpu
+proc
+flatten
+opt
+# Keep the operand buffers as memory cells (block RAM candidates) instead of
+# expanding 128 Kib of storage into flip-flops.
+memory -nomap
+opt -full
+techmap
+opt
+abc
+opt_clean
+check -assert
+stat
+write_json build/tpu.json

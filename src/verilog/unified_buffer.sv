@@ -1,68 +1,47 @@
 import tpu_pkg::*;
 
+// Operand buffers: one memory per array lane for X and W.
+// The host writes one INT8 element per cycle; the engine reads a whole
+// N-element column (X[:, i] and W[:, i]) per cycle.
 module unified_buffer (
-    input logic i_clk,
-    input logic i_rst_n,
+    input  logic i_clk,
 
-    input logic i_host_wenable,
-    input logic [ADDR_WIDTH-1:0] i_host_waddr,
-    input logic [DATA_WIDTH-1:0] i_host_wdata,
-    output logic o_host_wready,
+    input  logic i_host_wenable,
+    input  logic [ADDR_WIDTH-1:0] i_host_waddr,
+    input  logic [DATA_WIDTH-1:0] i_host_wdata,
 
-    input logic i_host_renable,
-    input logic [ADDR_WIDTH-1:0] i_host_raddr,
-    output logic [DATA_WIDTH-1:0] o_host_rdata,
-    output logic o_host_valid,
-
-    input logic i_mac_wenable,
-    input logic [ADDR_WIDTH-1:0] i_mac_waddr,
-    input logic [ACC_WIDTH-1:0] i_mac_wdata,
-
-    input logic i_weight_renable,
-    input logic [ADDR_WIDTH-1:0] i_weight_raddr,
-    output logic [DATA_WIDTH-1:0] o_weight_rdata,
-    output logic o_weight_valid,
-
-    input logic i_act_renable,
-    input logic [ADDR_WIDTH-1:0] i_act_raddr,
-    output logic [DATA_WIDTH-1:0] o_act_rdata,
-    output logic o_act_valid
+    input  logic i_rd_enable,
+    input  logic [K_WIDTH-1:0] i_rd_index,
+    output logic [ARRAY_SIZE-1:0][DATA_WIDTH-1:0] o_act_vec,
+    output logic [ARRAY_SIZE-1:0][DATA_WIDTH-1:0] o_weight_vec
 );
-    
-    logic [ACC_WIDTH-1:0] mem [MEM_DEPTH-1:0];
+    logic [1:0] w_region;
+    logic [IDX_WIDTH-1:0] w_lane;
+    logic [K_WIDTH-1:0] w_index;
 
-    always_ff @(posedge i_clk) begin
-        if (i_host_wenable) begin
-            mem[i_host_waddr] <= {{(ACC_WIDTH-DATA_WIDTH){i_host_wdata[DATA_WIDTH-1]}}, i_host_wdata};
-        end 
-        else if (i_mac_wenable) begin
-            mem[i_mac_waddr] <= i_mac_wdata;
+    assign {w_region, w_lane, w_index} = i_host_waddr;
+
+    for (genvar g = 0; g < ARRAY_SIZE; g++) begin : g_lane
+        logic [DATA_WIDTH-1:0] act_mem [K_MAX];
+        logic [DATA_WIDTH-1:0] weight_mem [K_MAX];
+        logic [DATA_WIDTH-1:0] act_q, weight_q;
+
+        always_ff @(posedge i_clk) begin
+            if (i_host_wenable && w_region == REGION_X && w_lane == IDX_WIDTH'(g))
+                act_mem[w_index] <= i_host_wdata;
+            if (i_rd_enable)
+                act_q <= act_mem[i_rd_index];
         end
-    end
-    assign o_host_wready = 1'b1;  
 
-    always_ff @(posedge i_clk or negedge i_rst_n) begin
-        if (!i_rst_n) begin
-            o_host_valid <= 1'b0;
-            o_host_rdata <= '0;
-            o_weight_valid <= 1'b0;
-            o_weight_rdata <= '0;
-            o_act_valid <= 1'b0;
-            o_act_rdata <= '0;
-        end 
-        else begin
-            // Host read
-            o_host_valid <= i_host_renable;
-            o_host_rdata <= i_host_renable ? mem[i_host_raddr][DATA_WIDTH-1:0] : o_host_rdata;
-
-            // Weight read
-            o_weight_valid <= i_weight_renable;
-            o_weight_rdata <= i_weight_renable ? mem[i_weight_raddr][DATA_WIDTH-1:0] : o_weight_rdata;
-
-            // Activation read
-            o_act_valid <= i_act_renable;
-            o_act_rdata <= i_act_renable ? mem[i_act_raddr][DATA_WIDTH-1:0] : o_act_rdata;
+        always_ff @(posedge i_clk) begin
+            if (i_host_wenable && w_region == REGION_W && w_lane == IDX_WIDTH'(g))
+                weight_mem[w_index] <= i_host_wdata;
+            if (i_rd_enable)
+                weight_q <= weight_mem[i_rd_index];
         end
+
+        assign o_act_vec[g] = act_q;
+        assign o_weight_vec[g] = weight_q;
     end
 
 endmodule

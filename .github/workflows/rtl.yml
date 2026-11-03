@@ -1,0 +1,13 @@
+name: RTL checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  tinytpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install simulators and synthesis tools
+        run: sudo apt-get update && sudo apt-get install -y iverilog verilator yosys
+      - name: Simulate, lint, and synthesize
+        run: make check
